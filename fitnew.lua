@@ -126,7 +126,7 @@ end
 
 function get_server_mac_from_record_file(userid)
   local record_userid_server_mac_file = "/var/run/fitnew_userid_mac"
-  local cmd_get_server_mac_by_user_id_prefix = [[cat /var/run/fitnew_userid_mac | grep %s | awk -F";" '{print $2}']]  
+  local cmd_get_server_mac_by_user_id_prefix = [[cat /var/run/fitnew_userid_mac | grep %s | awk -F";" '{print $3}']]  
   local cmd_get_server_mac_by_user_id = string.format(cmd_get_server_mac_by_user_id_prefix,userid)
   local server_mac = sys.exec(cmd_get_server_mac_by_user_id)
   return string.gsub(server_mac,"\n","")
@@ -155,19 +155,6 @@ function parse_data_from_phone(data,env)
   end
 end
 
---[[
-function get_conn_into_from_record_file_by_userid()
-  local record_userid_server_mac_file = "/var/run/fitnew_userid_mac"
-  local cmd_get_userid = string.format([[cat %s | grep %s | awk -F";" '{print 1}']],record_userid_server_mac_file,)
-  local cmd_get_mac_client = string.format([[cat %s | grep %s | awk -F";" '{print 2}']])
-  local cmd_get_mac_server = string.format([[cat %s | grep %s | awk -F";" '{print 3}']])
-  local userid = sys.exec(cmd_get_userid)
-  local mac_client = sys.exec(cmd_get_mac_client)
-  local mac_server = sys.exec(cmd_get_mac_server)
-  return userid,mac_client,mac_server
-end
-]]
-
 function parse_data_from_pad(data,env)
 	local ip_client = env.REMOTE_HOST
 	local mac_client = get_mac_by_ip(ip_client)
@@ -179,7 +166,7 @@ function parse_data_from_pad(data,env)
           result = remove_mac_from_blacklist(data.client)
         end
         record_userid_servermac_to_file(userid,data.server)
-        return cjson.encode({errcode=result})
+        return result
   	elseif (data.action == 1) then --消息从平板发出，请求路由器将设备踢下线并将mac地址拉入黑名单
         local result_dis = disassociate(data.client) --踢掉用户
     		local result_rm_rule = rm_rule(data.client,mac_server) --删除规则(本应是mac_client,为了方便测试改为data.client)
