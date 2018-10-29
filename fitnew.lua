@@ -61,12 +61,18 @@ function os.capture(cmd)
 	return s
 end
 
-cmd_redirect = "ebtables -t nat -I PREROUTING -s %s -p ipv4 --ip-proto udp --ip-dst 239.255.255.250 --ip-dport 1900 -j dnat --to-destination %s"
-cmd_accept   = "ebtables -I FORWARD -s %s -d %s -p ipv4 --ip-proto udp --ip-dport 1900 -j ACCEPT"
+--cmd_redirect = "ebtables -t nat -I PREROUTING -s %s -p ipv4 --ip-proto udp --ip-dst 239.255.255.250 --ip-dport 1900 -j dnat --to-destination %s"
+cmd_redirect = "ebtables -t nat -I PREROUTING -s %s -p ipv4 --ip-proto udp --ip-dport 1900 -j dnat --to-destination %s && \
+                ebtables -t nat -I PREROUTING -s %s -p ipv4 --ip-proto udp --ip-dport 5353 -j dnat --to-destination %s"
+cmd_accept   = "ebtables -I FORWARD -s %s -d %s -p ipv4 --ip-proto udp --ip-dport 1900 -j ACCEPT && \
+                ebtables -I FORWARD -s %s -d %s -p ipv4 --ip-proto udp --ip-dport 5353 -j ACCEPT"
 cmd_prefix = "cat /tmp/dhcp.leases | grep %s | awk '{print $2}'"
 
-cmd_rm_redirect = "ebtables -t nat -D PREROUTING -s %s -p ipv4 --ip-proto udp --ip-dst 239.255.255.250 --ip-dport 1900 -j dnat --to-destination %s"
-cmd_rm_accept   = "ebtables -D FORWARD -s %s -d %s -p ipv4 --ip-proto udp --ip-dport 1900 -j ACCEPT"
+--cmd_rm_redirect = "ebtables -t nat -D PREROUTING -s %s -p ipv4 --ip-proto udp --ip-dst 239.255.255.250 --ip-dport 1900 -j dnat --to-destination %s"
+cmd_rm_redirect = "ebtables -t nat -D PREROUTING -s %s -p ipv4 --ip-proto udp --ip-dport 1900 -j dnat --to-destination %s && \
+                   ebtables -t nat -D PREROUTING -s %s -p ipv4 --ip-proto udp --ip-dport 5353 -j dnat --to-destination %s"
+cmd_rm_accept   = "ebtables -D FORWARD -s %s -d %s -p ipv4 --ip-proto udp --ip-dport 1900 -j ACCEPT && \
+                   ebtables -D FORWARD -s %s -d %s -p ipv4 --ip-proto udp --ip-dport 5353 -j ACCEPT"
 
 function get_mac_by_ip(ip)
 	local cmd_get_mac_by_ip = string.format(cmd_prefix,ip)
@@ -75,10 +81,10 @@ function get_mac_by_ip(ip)
 end
 
 function build_rule(mac_client,mac_server)
-	local cmd_redirect_client2server = string.format(cmd_redirect,mac_client,mac_server)
-	local cmd_redirect_server2client = string.format(cmd_redirect,mac_server,mac_client)
-	local cmd_accept_client2server   = string.format(cmd_accept,mac_client,mac_server)
-	local cmd_accept_server2client   = string.format(cmd_accept,mac_server,mac_client)
+	local cmd_redirect_client2server = string.format(cmd_redirect,mac_client,mac_server,mac_client,mac_server)
+	local cmd_redirect_server2client = string.format(cmd_redirect,mac_server,mac_client,mac_server,mac_client)
+	local cmd_accept_client2server   = string.format(cmd_accept,mac_client,mac_server,mac_client,mac_server)
+	local cmd_accept_server2client   = string.format(cmd_accept,mac_server,mac_client,mac_server,mac_client)
 
 	local table_cmd = {cmd_redirect_client2server,cmd_redirect_server2client,cmd_accept_client2server,cmd_accept_server2client}
 	for i=1,4 do
@@ -91,10 +97,10 @@ function build_rule(mac_client,mac_server)
 end
 
 function rm_rule(mac_client,mac_server)
-	local cmd_rm_redirect_client2server = string.format(cmd_rm_redirect,mac_client,mac_server)
-	local cmd_rm_redirect_server2client = string.format(cmd_rm_redirect,mac_server,mac_client)
-	local cmd_rm_accept_client2server   = string.format(cmd_rm_accept,mac_client,mac_server)
-	local cmd_rm_accept_server2client   = string.format(cmd_rm_accept,mac_server,mac_client)
+	local cmd_rm_redirect_client2server = string.format(cmd_rm_redirect,mac_client,mac_server,mac_client,mac_server)
+	local cmd_rm_redirect_server2client = string.format(cmd_rm_redirect,mac_server,mac_client,mac_server,mac_client)
+	local cmd_rm_accept_client2server   = string.format(cmd_rm_accept,mac_client,mac_server,mac_client,mac_server)
+	local cmd_rm_accept_server2client   = string.format(cmd_rm_accept,mac_server,mac_client,mac_server,mac_client)
   
 	local table_cmd = {cmd_rm_redirect_client2server,cmd_rm_redirect_server2client,cmd_rm_accept_client2server,cmd_rm_accept_server2client}
 	for i=1,4 do
@@ -155,25 +161,38 @@ function parse_data_from_phone(data,env)
   end
 end
 
+function get_phone_mac_from_record_file_by_userid(userid)
+  local record_userid_server_mac_file = "/var/run/fitnew_userid_mac"
+  local cmd_prefix = [[cat %s | grep %s | awk -F";" '{print $2}']]
+  local cmd        = string.format(cmd_prefix,record_userid_servermac_to_file,userid)
+  local result     = luci.exec(cmd)
+  if(string.len(result) == 1) then
+    return 0
+  else
+    return result
+  end
+end
+
 function parse_data_from_pad(data,env)
 	local ip_client = env.REMOTE_HOST
-	local mac_client = get_mac_by_ip(ip_client)
-	local mac_server = data.server
+	local mac_server = get_mac_by_ip(ip_client) -- 在这里为平板mac地址
   local userid    = data.userid
+  local mac_phone = get_phone_mac_from_record_file_by_userid(userid)
 	if(data.action == 0) then --用户扫二维码时，平板发出消息(消息中有client地址则从黑名单中移除,主要是为了将用户ID和平板mac地址记录下来)
         local result
-        if(data.client ~= nil) then
-          result = remove_mac_from_blacklist(data.client)
+        if(mac_phone ~= 0) then --不是第一次登录,将mac地址从黑名单中移除
+          result = remove_mac_from_blacklist(mac_phone)
+        else
+          record_userid_servermac_to_file(userid,mac_server)
         end
-        record_userid_servermac_to_file(userid,data.server)
         return result
-  	elseif (data.action == 1) then --消息从平板发出，请求路由器将设备踢下线并将mac地址拉入黑名单
+  elseif (data.action == 1) then --消息从平板发出，请求路由器将设备踢下线并将mac地址拉入黑名单
         local result_dis = disassociate(data.client) --踢掉用户
     		local result_rm_rule = rm_rule(data.client,mac_server) --删除规则(本应是mac_client,为了方便测试改为data.client)
         local result_add_mac_to_blacklist = add_mac_to_blacklist(data.client) --将用户加入黑名单
-        local result_delete_userid_entry  = delete_userid_entry(userid)
+        --local result_delete_userid_entry  = delete_userid_entry(userid)
         return result_dis
-    elseif (data.action == 2) then --平板向路由器请求获取wifi的SSID及密码
+  elseif (data.action == 2) then --平板向路由器请求获取wifi的SSID及密码
         local cmd_get_wifi_ssid = "uci get wireless.default_radio0.ssid"
         local cmd_get_wifi_key = "uci get wireless.default_radio0.key"
         
@@ -181,12 +200,12 @@ function parse_data_from_pad(data,env)
         local result_key  = sys.exec(cmd_get_wifi_key)
         local result  = {ssid= string.gsub(result_ssid,"\n",""),key= string.gsub(result_key,"\n","")}
         return cjson.encode(result)
-  	end
+  end
 end
 
 function handle_request(env)
 	uhttpd.send("Status: 200 OK\r\n")
-	uhttpd.send("Content-Type: text/html\r\n\r\n")
+	uhttpd.send("Content-Type: application/json\r\n\r\n")
  
 	local client_data = io.read("*all")
 	local data = cjson.decode(client_data)
