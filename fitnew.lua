@@ -156,7 +156,7 @@ function get_phone_mac_from_record_file_by_userid(userid)
   local cmd        = string.format(cmd_prefix,userid)
   syslog("cmd: "..cmd)
   local result     = sys.exec(cmd)
-  if(string.len(result) == 1) then
+  if(string.len(result) == 1 or string.len(result) == 0) then
     return 0
   else
     return result
@@ -164,7 +164,7 @@ function get_phone_mac_from_record_file_by_userid(userid)
 end
 
 function get_server_mac_from_record_file(userid)
-  local record_userid_server_mac_file = "/var/run/fitnew_userid_mac"
+  --local record_userid_server_mac_file = "/var/run/fitnew_userid_mac"
   local cmd_get_server_mac_by_user_id_prefix = [[cat /var/run/fitnew_userid_mac | grep %s | awk -F";" '{print $3}']]  
   local cmd_get_server_mac_by_user_id = string.format(cmd_get_server_mac_by_user_id_prefix,userid)
   local server_mac = sys.exec(cmd_get_server_mac_by_user_id)
@@ -174,11 +174,14 @@ end
 function parse_data_from_pad(data,env)
 	local ip_client = env.REMOTE_HOST
 	local mac_server = get_mac_by_ip(ip_client) -- 在这里为平板mac地址
-  syslog("parse data_from_pad")
+  syslog("mac_server: "..mac_server)
+  syslog("ip client: "..ip_client)
   local userid    = data.userid
-  local mac_phone = get_phone_mac_from_record_file_by_userid(userid)
+  
 	if(data.action == 0) then --用户扫二维码时，平板发出消息(消息中有client地址则从黑名单中移除,主要是为了将用户ID和平板mac地址记录下来)
         local result
+        local mac_phone = get_phone_mac_from_record_file_by_userid(userid)
+        syslog("mac_phone: "..mac_phone)
         if(mac_phone ~= 0) then --不是第一次登录,将mac地址从黑名单中移除
           result = remove_mac_from_blacklist(mac_phone)
         else
