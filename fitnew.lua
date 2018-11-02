@@ -32,7 +32,11 @@ end
 function disassociate(mac)
 	local cmd_disassociate = "hostapd_cli -i wlan0 disassociate "..mac
 	local result = sys.exec(cmd_disassociate)
-	return cjson.encode({errcode=result})
+  if(result == "OK\n") then
+    return cjson.encode({errcode=0})
+  else
+    return cjson.encode({errcode=result})
+  end
 end
 
 function add_mac_to_blacklist(mac)
@@ -192,6 +196,10 @@ function parse_data_from_pad(data,env)
         return result
   elseif (data.action == 1) then --消息从平板发出，请求路由器将设备踢下线并将mac地址拉入黑名单
         local mac_phone = get_phone_mac_from_record_file_by_userid(userid)
+        if(mac_phone == 0) then -- 用户扫码,但是没有使用小程序连接wifi
+          local result_delete_userid_entry  = delete_userid_entry(userid)
+          return result_delete_userid_entry
+        end
         local result_dis = disassociate(mac_phone) --踢掉用户
     		local result_rm_rule = rm_rule(mac_phone,mac_server) --删除规则(本应是mac_client,为了方便测试改为data.client)
         local result_add_mac_to_blacklist = add_mac_to_blacklist(mac_phone) --将用户加入黑名单
