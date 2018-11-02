@@ -45,7 +45,7 @@ end
 
 function remove_mac_from_blacklist(mac)
     local file_maclist = "/var/run/hostapd_fitnew_maclist.conf"
-    local cmd_remove_mac_from_black_list_prefix = "sed -i '/%s/d' %s"
+    local cmd_remove_mac_from_black_list_prefix = "sed -i '/%s.*/d' %s"
     local cmd_remove_mac_from_black_list = string.format(cmd_remove_mac_from_black_list_prefix,mac,file_maclist)
     syslog(cmd_remove_mac_from_black_list)
     local result = sys.call(cmd_remove_mac_from_black_list)
@@ -86,11 +86,11 @@ function build_rule(mac_client,mac_server)
 	local cmd_accept_client2server   = string.format(cmd_accept,mac_client,mac_server,mac_client,mac_server)
 	local cmd_accept_server2client   = string.format(cmd_accept,mac_server,mac_client,mac_server,mac_client)
 
-	local table_cmd = {cmd_redirect_client2server,cmd_redirect_server2client,cmd_accept_client2server,cmd_accept_server2client}
+	local table_cmd_build = {cmd_redirect_client2server,cmd_redirect_server2client,cmd_accept_client2server,cmd_accept_server2client}
 	for i=1,4 do
-		local result = sys.call(table_cmd[i])
+		local result = sys.call(table_cmd_build[i])
 		if(result ~= 0) then
-			return cjson.encode({errcode=1,cmd=table_cmd[i]})
+			return cjson.encode({errcode=1,cmd=table_cmd_build[i]})
 		end
 	end
   return 0
@@ -102,11 +102,11 @@ function rm_rule(mac_client,mac_server)
 	local cmd_rm_accept_client2server   = string.format(cmd_rm_accept,mac_client,mac_server,mac_client,mac_server)
 	local cmd_rm_accept_server2client   = string.format(cmd_rm_accept,mac_server,mac_client,mac_server,mac_client)
   
-	local table_cmd = {cmd_rm_redirect_client2server,cmd_rm_redirect_server2client,cmd_rm_accept_client2server,cmd_rm_accept_server2client}
+	local table_cmd_rm = {cmd_rm_redirect_client2server,cmd_rm_redirect_server2client,cmd_rm_accept_client2server,cmd_rm_accept_server2client}
 	for i=1,4 do
-		local result = sys.call(table_cmd[i])
+		local result = sys.call(table_cmd_rm[i])
 		if(result ~= 0) then
-			syslog("call error: "..table_cmd[i])
+			syslog("call error: "..table_cmd_rm[i])
 		end
 	end
 end
@@ -131,8 +131,9 @@ end
 function update_record_file(userid,mac_client,mac_server)
   local record_userid_server_mac_file = "/var/run/fitnew_userid_mac"
   local record_new = string.format("%s;%s;%s",userid,mac_client,mac_server)
-  local cmd_replace_record_prefix = "sed -i 's/^%s/%s/'"
-  local cmd_replace_record = string.format(cmd_replace_record_prefix,userid,record_new)
+  local cmd_replace_record_prefix = "sed -i 's/^%s.*/%s/g' %s"
+  local cmd_replace_record = string.format(cmd_replace_record_prefix,userid,record_new,record_userid_server_mac_file)
+  syslog("sed command: "..cmd_replace_record)
   local result = sys.exec(cmd_replace_record)
   return result
 end
@@ -141,7 +142,7 @@ function parse_data_from_phone(data,env)
   local ip_client = env.REMOTE_HOST
 	local mac_client = get_mac_by_ip(ip_client)
   local userid    = data.userid
-  local mac_server = get_server_mac_from_record_file(userid)
+  local mac_server = get_server_mac_from_record_file_by_userid(userid)
   local result = build_rule(mac_client,mac_server)  -- 实际为mac_client,为了方便测试，改为data.client
   update_record_file(userid,mac_client,mac_server)
   if(result == 0) then
@@ -152,18 +153,19 @@ function parse_data_from_phone(data,env)
 end
 
 function get_phone_mac_from_record_file_by_userid(userid)
-  local cmd_prefix = [[cat /var/run/fitnew_userid_mac | grep %s | awk -F";" '{print $2}']]
-  local cmd        = string.format(cmd_prefix,userid)
-  syslog("cmd: "..cmd)
-  local result     = sys.exec(cmd)
-  if(string.len(result) == 1 or string.len(result) == 0) then
+  local cmd_get_phone_mac_by_user_id_prefix = [[cat /var/run/fitnew_userid_mac | grep %s | awk -F";" '{print $2}']]  
+  local cmd_get_phone_mac_by_user_id = string.format(cmd_get_phone_mac_by_user_id_prefix,userid)
+  
+  local phone_mac = sys.exec(cmd_get_phone_mac_by_user_id)
+
+  if(string.len(phone_mac) == 0) then
     return 0
   else
-    return result
+    return string.gsub(phone_mac,"\n","")
   end
 end
 
-function get_server_mac_from_record_file(userid)
+function get_server_mac_from_record_file_by_userid(userid)
   --local record_userid_server_mac_file = "/var/run/fitnew_userid_mac"
   local cmd_get_server_mac_by_user_id_prefix = [[cat /var/run/fitnew_userid_mac | grep %s | awk -F";" '{print $3}']]  
   local cmd_get_server_mac_by_user_id = string.format(cmd_get_server_mac_by_user_id_prefix,userid)
@@ -179,7 +181,7 @@ function parse_data_from_pad(data,env)
   local userid    = data.userid
   
 	if(data.action == 0) then --用户扫二维码时，平板发出消息(消息中有client地址则从黑名单中移除,主要是为了将用户ID和平板mac地址记录下来)
-        local result
+        local result = 0
         local mac_phone = get_phone_mac_from_record_file_by_userid(userid)
         syslog("mac_phone: "..mac_phone)
         if(mac_phone ~= 0) then --不是第一次登录,将mac地址从黑名单中移除
@@ -189,9 +191,10 @@ function parse_data_from_pad(data,env)
         end
         return result
   elseif (data.action == 1) then --消息从平板发出，请求路由器将设备踢下线并将mac地址拉入黑名单
-        local result_dis = disassociate(data.client) --踢掉用户
-    		local result_rm_rule = rm_rule(data.client,mac_server) --删除规则(本应是mac_client,为了方便测试改为data.client)
-        local result_add_mac_to_blacklist = add_mac_to_blacklist(data.client) --将用户加入黑名单
+        local mac_phone = get_phone_mac_from_record_file_by_userid(userid)
+        local result_dis = disassociate(mac_phone) --踢掉用户
+    		local result_rm_rule = rm_rule(mac_phone,mac_server) --删除规则(本应是mac_client,为了方便测试改为data.client)
+        local result_add_mac_to_blacklist = add_mac_to_blacklist(mac_phone) --将用户加入黑名单
         --local result_delete_userid_entry  = delete_userid_entry(userid)
         return result_dis
   elseif (data.action == 2) then --平板向路由器请求获取wifi的SSID及密码
