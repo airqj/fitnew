@@ -30,6 +30,7 @@ function table2json(t)
 end  
 
 function disassociate(mac)
+  syslog("disassociate: "..mac)
 	local cmd_disassociate = "hostapd_cli -i wlan0 disassociate "..mac
 	local result = sys.exec(cmd_disassociate)
   if(result == "OK\n") then
@@ -40,6 +41,7 @@ function disassociate(mac)
 end
 
 function add_mac_to_blacklist(mac)
+    syslog("add mac to blacklist: "..mac)
     local file_path = "/var/run/hostapd_fitnew_maclist.conf"
     local file = io.open(file_path,"a")
     io.output(file)
@@ -150,6 +152,7 @@ function update_record_file(userid,mac_client,mac_server)
 end
 
 function parse_data_from_phone(data,env)
+  syslog("type=1")
   local ip_client = env.REMOTE_HOST
 	local mac_client = get_mac_by_ip(ip_client)
   local userid    = data.userid
@@ -194,29 +197,32 @@ function parse_data_from_pad(data,env)
 	if(data.action == 0) then --用户扫二维码时，平板发出消息(消息中有client地址则从黑名单中移除,主要是为了将用户ID和平板mac地址记录下来)
         local result = 0
         local mac_phone = get_phone_mac_from_record_file_by_userid(userid)
-        --syslog("mac_phone: "..mac_phone)
         if(mac_phone ~= 0) then 
           --不是第一次登录,将mac地址从黑名单中移除(文件中已有完整的 userid:client_mac:server_mac映射关系)
           --将手机mac地址从黑名单中移除,并更新关系映射文件,以防止用户是从不同的平板电脑登录导致无法一对一投屏
+          syslog("type=0,action=0,mac_phone="..mac_phone)
           update_record_file(userid,"",mac_server)
           result = remove_mac_from_blacklist(mac_phone)
         else
+          syslog("type=0,action=0,mac_phone=0")
           result = record_userid_servermac_to_file(userid,mac_server) -- 第一次登录,将用户ID和平板mac地址写入文件
         end
         return cjson.encode({errcode=result})
   elseif (data.action == 1) then --消息从平板发出，请求路由器将设备踢下线并将mac地址拉入黑名单
         local mac_phone = get_phone_mac_from_record_file_by_userid(userid)
-        syslog("mac_phone in action1: "..mac_phone)
         if(mac_phone == 0) then -- 用户扫码,但是没有使用小程序连接wifi
+          syslog("type=0,action=1,mac_phone=0")
           local result_delete_userid_entry  = delete_userid_entry(userid)
           return result_delete_userid_entry
         end
+        syslog("type=0,action=1,mac_phone="..mac_phone)
         local result_dis = disassociate(mac_phone) --踢掉用户
     		local result_rm_rule = rm_rule(mac_phone,mac_server) --删除规则(本应是mac_client,为了方便测试改为data.client)
         local result_add_mac_to_blacklist = add_mac_to_blacklist(mac_phone) --将用户加入黑名单
         --local result_delete_userid_entry  = delete_userid_entry(userid)
         return result_dis
   elseif (data.action == 2) then --平板向路由器请求获取wifi的SSID及密码
+        syslog("type=0,action=2")
         local cmd_get_wifi_ssid = "uci get wireless.default_radio0.ssid"
         local cmd_get_wifi_key = "uci get wireless.default_radio0.key"
         
@@ -236,7 +242,6 @@ function handle_request(env)
 	if(data.type == 0) then
     syslog("data.type==0")
 		local result = parse_data_from_pad(data,env)
-    syslog(result)
     uhttpd.send(result)
   elseif(data.type == 1) then
     local result = parse_data_from_phone(data,env)
