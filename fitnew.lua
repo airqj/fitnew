@@ -53,7 +53,7 @@ function remove_mac_from_blacklist(mac)
     local cmd_remove_mac_from_black_list = string.format(cmd_remove_mac_from_black_list_prefix,mac,file_maclist)
     syslog(cmd_remove_mac_from_black_list)
     local result = sys.call(cmd_remove_mac_from_black_list)
-    return cjson.encode({errcode=result})
+    return result
 end
 
 function syslog(log)
@@ -115,22 +115,29 @@ function rm_rule(mac_client,mac_server)
 	end
 end
 
-function record_userid_servermac_to_file(userid,server_mac)
-  local record_userid_servermac_file = "/var/run/fitnew_userid_mac"
-  local line = string.format("%s;;%s",userid,server_mac)
-  local file = io.open(record_userid_servermac_file,"a")
-  io.output(file)
-  io.write(line.."\n")
-  io.close(file)
-end
-
 function delete_userid_entry(userid)
   local record_userid_servermac_file = "/var/run/fitnew_userid_mac"
   local cmd_delete_userid_entry_prefix = "sed -i '/^%s/d' %s"
   local cmd_delete_userid_entry = string.format(cmd_delete_userid_entry_prefix,userid,record_userid_servermac_file)
-  local result = sys.exec(cmd_delete_userid_entry)
+  local result = sys.call(cmd_delete_userid_entry)
   return  cjson.encode({errcode=result})
 end
+
+function record_userid_servermac_to_file(userid,server_mac)
+  delete_userid_entry(userid) -- 写之前先将同一userid的记录删掉
+  local record_userid_servermac_file = "/var/run/fitnew_userid_mac"
+  local line = string.format("%s;;%s",userid,server_mac)
+  local file = io.open(record_userid_servermac_file,"a")
+  io.output(file)
+  local result = io.write(line.."\n")
+  io.close(file)
+  if(result == true) then
+    return 0
+  else
+    return result
+  end
+end
+
 
 function update_record_file(userid,mac_client,mac_server)
   local record_userid_server_mac_file = "/var/run/fitnew_userid_mac"
@@ -162,7 +169,7 @@ function get_phone_mac_from_record_file_by_userid(userid)
   
   local phone_mac = sys.exec(cmd_get_phone_mac_by_user_id)
 
-  if(string.len(phone_mac) == 0) then
+  if(string.len(phone_mac) == 0 or string.len(phone_mac) == 1) then
     return 0
   else
     return string.gsub(phone_mac,"\n","")
@@ -187,15 +194,19 @@ function parse_data_from_pad(data,env)
 	if(data.action == 0) then --用户扫二维码时，平板发出消息(消息中有client地址则从黑名单中移除,主要是为了将用户ID和平板mac地址记录下来)
         local result = 0
         local mac_phone = get_phone_mac_from_record_file_by_userid(userid)
-        syslog("mac_phone: "..mac_phone)
-        if(mac_phone ~= 0) then --不是第一次登录,将mac地址从黑名单中移除
+        --syslog("mac_phone: "..mac_phone)
+        if(mac_phone ~= 0) then 
+          --不是第一次登录,将mac地址从黑名单中移除(文件中已有完整的 userid:client_mac:server_mac映射关系)
+          --将手机mac地址从黑名单中移除,并更新关系映射文件,以防止用户是从不同的平板电脑登录导致无法一对一投屏
+          update_record_file(userid,"",mac_server)
           result = remove_mac_from_blacklist(mac_phone)
         else
-          record_userid_servermac_to_file(userid,mac_server) -- 第一次登录,将用户ID和平板mac地址写入文件
+          result = record_userid_servermac_to_file(userid,mac_server) -- 第一次登录,将用户ID和平板mac地址写入文件
         end
-        return result
+        return cjson.encode({errcode=result})
   elseif (data.action == 1) then --消息从平板发出，请求路由器将设备踢下线并将mac地址拉入黑名单
         local mac_phone = get_phone_mac_from_record_file_by_userid(userid)
+        syslog("mac_phone in action1: "..mac_phone)
         if(mac_phone == 0) then -- 用户扫码,但是没有使用小程序连接wifi
           local result_delete_userid_entry  = delete_userid_entry(userid)
           return result_delete_userid_entry
