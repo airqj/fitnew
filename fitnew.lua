@@ -201,7 +201,10 @@ function parse_data_from_pad(data,env)
           --不是第一次登录,将mac地址从黑名单中移除(文件中已有完整的 userid:client_mac:server_mac映射关系)
           --将手机mac地址从黑名单中移除,并更新关系映射文件,以防止用户是从不同的平板电脑登录导致无法一对一投屏
           syslog("type=0,action=0,mac_phone="..mac_phone)
-          update_record_file(userid,"",mac_server)
+          local mac_server_history = get_server_mac_from_record_file_by_userid(userid)
+          rm_rule(mac_phone,mac_server_history)
+          --update_record_file(userid,"",mac_server)
+          update_record_file(userid,mac_phone,mac_server)
           result = remove_mac_from_blacklist(mac_phone)
         else
           syslog("type=0,action=0,mac_phone=0")
@@ -210,6 +213,7 @@ function parse_data_from_pad(data,env)
         return cjson.encode({errcode=result})
   elseif (data.action == 1) then --消息从平板发出，请求路由器将设备踢下线并将mac地址拉入黑名单
         local mac_phone = get_phone_mac_from_record_file_by_userid(userid)
+        local mac_server_history = get_server_mac_from_record_file_by_userid(userid)
         if(mac_phone == 0) then -- 用户扫码,但是没有使用小程序连接wifi
           syslog("type=0,action=1,mac_phone=0")
           local result_delete_userid_entry  = delete_userid_entry(userid)
@@ -218,7 +222,11 @@ function parse_data_from_pad(data,env)
         syslog("type=0,action=1,mac_phone="..mac_phone)
         local result_dis = disassociate(mac_phone) --踢掉用户
     		local result_rm_rule = rm_rule(mac_phone,mac_server) --删除规则(本应是mac_client,为了方便测试改为data.client)
-        local result_add_mac_to_blacklist = add_mac_to_blacklist(mac_phone) --将用户加入黑名单
+        syslog("mac_server: "..mac_server)
+        syslog("mac_server_history: "..mac_server_history)
+        if(mac_server == mac_server_history) then
+          local result_add_mac_to_blacklist = add_mac_to_blacklist(mac_phone) --将用户加入黑名单
+        end
         --local result_delete_userid_entry  = delete_userid_entry(userid)
         return result_dis
   elseif (data.action == 2) then --平板向路由器请求获取wifi的SSID及密码
