@@ -72,8 +72,7 @@ cmd_redirect = "ebtables -t nat -I PREROUTING -s %s -p ipv4 --ip-proto udp --ip-
                 ebtables -t nat -I PREROUTING -s %s -p ipv4 --ip-proto udp --ip-dport 5353 -j dnat --to-destination %s"
 --cmd_accept   = "ebtables -I FORWARD -s %s -d %s -p ipv4 --ip-proto udp --ip-dport 1900 -j ACCEPT && \
 --                ebtables -I FORWARD -s %s -d %s -p ipv4 --ip-proto udp --ip-dport 5353 -j ACCEPT"
-cmd_accept = "ebtables -I FORWARD -p ipv4 --ip-proto tcp -s %s -d %s -j ACCEPT && \
-              ebtables -I FORWARD -p ipv4 --ip-proto tcp -s %s -d %s -j ACCEPT"
+cmd_accept = "ebtables -I FORWARD -p ipv4 --ip-proto tcp -s %s -d %s -j ACCEPT"
 cmd_prefix = "cat /tmp/dhcp.leases | grep %s | awk '{print $2}'"
 
 --cmd_rm_redirect = "ebtables -t nat -D PREROUTING -s %s -p ipv4 --ip-proto udp --ip-dst 239.255.255.250 --ip-dport 1900 -j dnat --to-destination %s"
@@ -82,8 +81,7 @@ cmd_rm_redirect = "ebtables -t nat -D PREROUTING -s %s -p ipv4 --ip-proto udp --
 --cmd_rm_accept   = "ebtables -D FORWARD -s %s -d %s -p ipv4 --ip-proto udp --ip-dport 1900 -j ACCEPT && \
 --                   ebtables -D FORWARD -s %s -d %s -p ipv4 --ip-proto udp --ip-dport 5353 -j ACCEPT"
 
-cmd_accept = "ebtables -D FORWARD -p ipv4 --ip-proto tcp -s %s -d %s -j ACCEPT && \
-              ebtables -D FORWARD -p ipv4 --ip-proto tcp -s %s -d %s -j ACCEPT"
+cmd_rm_accept = "ebtables -D FORWARD -p ipv4 --ip-proto tcp -s %s -d %s -j ACCEPT"
 
 function get_mac_by_ip(ip)
 	local cmd_get_mac_by_ip = string.format(cmd_prefix,ip)
@@ -94,11 +92,11 @@ end
 function build_rule(mac_client,mac_server)
 	--local cmd_redirect_client2server = string.format(cmd_redirect,mac_client,mac_server,mac_client,mac_server)
 	--local cmd_redirect_server2client = string.format(cmd_redirect,mac_server,mac_client,mac_server,mac_client)
-	local cmd_accept_client2server   = string.format(cmd_accept,mac_client,mac_server,mac_client,mac_server)
-	local cmd_accept_server2client   = string.format(cmd_accept,mac_server,mac_client,mac_server,mac_client)
+	local cmd_accept_client2server   = string.format(cmd_accept,mac_client,mac_server)
+	local cmd_accept_server2client   = string.format(cmd_accept,mac_server,mac_client)
 
 	local table_cmd_build = {cmd_accept_client2server,cmd_accept_server2client}
-	for i=1,4 do
+	for i=1,table.getn(table_cmd_build) do
 		local result = sys.call(table_cmd_build[i])
 		if(result ~= 0) then
 			return cjson.encode({errcode=1,cmd=table_cmd_build[i]})
@@ -110,11 +108,11 @@ end
 function rm_rule(mac_client,mac_server)
 	--local cmd_rm_redirect_client2server = string.format(cmd_rm_redirect,mac_client,mac_server,mac_client,mac_server)
 	--local cmd_rm_redirect_server2client = string.format(cmd_rm_redirect,mac_server,mac_client,mac_server,mac_client)
-	local cmd_rm_accept_client2server   = string.format(cmd_rm_accept,mac_client,mac_server,mac_client,mac_server)
-	local cmd_rm_accept_server2client   = string.format(cmd_rm_accept,mac_server,mac_client,mac_server,mac_client)
+	local cmd_rm_accept_client2server   = string.format(cmd_rm_accept,mac_client,mac_server)
+	local cmd_rm_accept_server2client   = string.format(cmd_rm_accept,mac_server,mac_client)
   
 	local table_cmd_rm = {cmd_rm_accept_client2server,cmd_rm_accept_server2client}
-	for i=1,4 do
+	for i=1,table.getn(table_cmd_rm) do
 		local result = sys.call(table_cmd_rm[i])
 		if(result ~= 0) then
 			syslog("call error: "..table_cmd_rm[i])
