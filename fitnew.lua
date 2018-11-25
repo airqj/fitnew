@@ -89,9 +89,17 @@ function get_mac_by_ip(ip)
   return string.gsub(mac,"\n","")
 end
 
+function pre_build_rule(mac)
+  local cmd_pre_build_rule = "/root/ebtables.sh "..mac
+  syslog("pre_build_rule: "..cmd_pre_build_rule)
+  sys.call(cmd_pre_build_rule)
+end
+
 function build_rule(mac_client,mac_server)
 	--local cmd_redirect_client2server = string.format(cmd_redirect,mac_client,mac_server,mac_client,mac_server)
 	--local cmd_redirect_server2client = string.format(cmd_redirect,mac_server,mac_client,mac_server,mac_client)
+  pre_build_rule(mac_client)
+  pre_build_rule(mac_server)
 	local cmd_accept_client2server   = string.format(cmd_accept,mac_client,mac_server)
 	local cmd_accept_server2client   = string.format(cmd_accept,mac_server,mac_client)
 
